@@ -192,3 +192,95 @@ With these updates, your form will now include:
 3. **AJAX** form submission, so the page doesn’t need to refresh after each submission.
 
 This will make the user experience smoother and allow you to capture more detailed information for each RFID scan.
+
+
+
+
+// THIS PART IS .INO FILE CHECK IT AND EDIT IT **********//
+
+#include <WiFi.h>
+#include "time.h"
+#include <MFRC522.h>
+#include <SPI.h>
+#include <HTTPClient.h> 
+
+#define RST_PIN  4
+#define SS_PIN 5
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);   
+const int buzPin = 25; 
+
+const char* ssid     = "WLAN_2818";
+const char* password = "erfan.askari021";
+
+const String room = "251";   // class number
+String URL = "http://192.168.1.4/myprojects/test/apply_data.php"; // change the IP address
+
+
+void setup() {
+  // Serial.begin(9600);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);  // Wait until connected
+  }
+
+  SPI.begin();
+  mfrc522.PCD_Init();
+  pinMode(buzPin, OUTPUT);
+  digitalWrite(buzPin, 0);
+}
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTION_LOST || WiFi.status() == WL_DISCONNECTED) {
+    lcd.setCursor(0, 0);
+    lcd.print("      Wifi      ");
+    lcd.setCursor(0, 1);
+    lcd.print("  Disconnected  ");
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(100);  // Wait until reconnected
+    }
+  }
+
+  if (!mfrc522.PICC_IsNewCardPresent()) {
+    return;
+  }
+
+  if (!mfrc522.PICC_ReadCardSerial()) {
+    return;
+  }
+  
+  String UidCard = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {  
+    UidCard.concat(String(mfrc522.uid.uidByte[i], HEX));
+  }
+
+  UidCard.toUpperCase();
+  String postData = "UIDCard=" + String(UidCard) + "&Room=" + String(room);
+  
+  HTTPClient http; 
+  http.begin(URL);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  int httpCode = http.POST(postData); 
+  String result = http.getString();
+  
+  if (result == "1") {
+    digitalWrite(buzPin, 1);
+    delay(70);
+  } else {
+    digitalWrite(buzPin, 1);
+    delay(30);
+    digitalWrite(buzPin, 0);
+    delay(70);
+    digitalWrite(buzPin, 1);
+    delay(30);
+    digitalWrite(buzPin, 0);
+    delay(70);
+    digitalWrite(buzPin, 1);
+    delay(30);
+    digitalWrite(buzPin, 0);
+  }
+
+  http.end();
+}
+
+
