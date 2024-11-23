@@ -1,149 +1,106 @@
-To enhance your form with additional fields such as:
 
-1. A **dropdown** for selecting a day of the week (`شنبه - یکشنبه - دوشنبه - سه‌شنبه - چهارشنبه`).
-2. **First name** and **Last name** fields.
 
-You can modify the HTML form in your ESP32 web server code. I'll walk you through adding these fields.
 
-### Updated Steps to Modify the Form:
+#include <Wire.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
-1. **Dropdown for Days**: Add a dropdown menu for selecting a day of the week.
-2. **First Name and Last Name**: Add text input fields for the **first name** and **last name**.
-3. **AJAX Handling**: Modify the **AJAX** code to send the additional fields to the **PHP server** for processing.
+#define RST_PIN  4   // Reset pin for RC522
+#define SS_PIN   5   // Slave Select pin for RC522
 
-### Step 1: Modify the HTML Form with New Fields
+const char* ssid = "WLAN_2818";       // Your Wi-Fi SSID
+const char* password = "erfan.askari021"; // Your Wi-Fi password
+const String serverURL = "http://192.168.1.5/myprojects/test/reader_data.php";  // URL of your PHP server
 
-Here’s how you can modify the **HTML** form to include the new fields:
+MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance
 
-```cpp
-server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    String html = "<html><body><h1>Enter Student Information</h1>";
-    html += "<form id='rfidForm' action='/submit' method='POST'>";
-    
-    // Day Dropdown (1)
-    html += "<label for='day'>Day:</label>";
-    html += "<select id='day' name='day'>";
-    html += "<option value='شنبه'>شنبه</option>";
-    html += "<option value='یکشنبه'>یکشنبه</option>";
-    html += "<option value='دوشنبه'>دوشنبه</option>";
-    html += "<option value='سه‌شنبه'>سه‌شنبه</option>";
-    html += "<option value='چهارشنبه'>چهارشنبه</option>";
-    html += "</select><br><br>";
+void setup() {
+  Serial.begin(115200);
+  SPI.begin(); // Initiate SPI bus
+  mfrc522.PCD_Init(); // Initiate MFRC522
+  connectWiFi();
+}
 
-    // First Name (2)
-    html += "<label for='first_name'>First Name:</label>";
-    html += "<input type='text' id='first_name' name='first_name' required><br><br>";
+void loop() {
+  if ( !mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+    return;
+  }
 
-    // Last Name (3)
-    html += "<label for='last_name'>Last Name:</label>";
-    html += "<input type='text' id='last_name' name='last_name' required><br><br>";
-    
-    // Student ID (4)
-    html += "<label for='student_id'>Student ID:</label>";
-    html += "<input type='text' id='student_id' name='student_id' required><br><br>";
-    
-    // Hidden RFID UID (5)
-    html += "<input type='hidden' id='rfid_uid' name='rfid_uid' value='" + rfid_uid + "'>";
-    
-    html += "<input type='submit' value='Submit'>";
-    html += "</form>";
-    
-    html += "<script>";
-    html += "let rfid_uid = '" + rfid_uid + "';";
-    html += "document.getElementById('rfid_uid').value = rfid_uid;";
-    html += "document.getElementById('rfidForm').addEventListener('submit', function(e) {";
-    html += "    e.preventDefault();";  // Prevent the default form submission
-    html += "    let student_id = document.getElementById('student_id').value;";
-    html += "    let first_name = document.getElementById('first_name').value;";
-    html += "    let last_name = document.getElementById('last_name').value;";
-    html += "    let day = document.getElementById('day').value;"; // Get selected day
-    
-    html += "    let formData = new FormData();";
-    html += "    formData.append('student_id', student_id);";
-    html += "    formData.append('rfid_uid', rfid_uid);";
-    html += "    formData.append('first_name', first_name);";
-    html += "    formData.append('last_name', last_name);";
-    html += "    formData.append('day', day);";  // Append the selected day
-    
-    html += "    fetch('/submit', {";
-    html += "        method: 'POST',";
-    html += "        body: formData";
-    html += "    }).then(response => response.text()).then(result => {";
-    html += "        if (result == '1') {";
-    html += "            alert('Data Submitted Successfully!');";
-    html += "        } else {";
-    html += "            alert('Submission Failed');";
-    html += "        }";
-    html += "    });";
-    html += "});";
-    html += "</script>";
-    
-    html += "</body></html>";
-    request->send(200, "text/html", html);
-});
-```
+  String uid = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    uid += String(mfrc522.uid.uidByte[i], HEX);
+  }
+  uid.toUpperCase();
+  Serial.println("UID: " + uid);
 
-### Key Changes:
-1. **Day Dropdown**:
-   - The `day` dropdown is added with options for each day (`شنبه - یکشنبه - دوشنبه - سه‌شنبه - چهارشنبه`).
-   
-2. **First Name and Last Name**:
-   - **First name** and **Last name** fields are added as required text inputs.
-   
-3. **AJAX Form Submission**:
-   - The `day`, `first_name`, and `last_name` values are collected and sent via **AJAX** to the server along with the **RFID UID** and **student ID**.
+  // Get user details
+  String firstName = getInput("Enter first name: ");
+  Serial.println("f: " + firstName);
+  String lastName = getInput("Enter last name: ");
+  Serial.println("l: " + lastName);
+  String studentID = getInput("Enter student ID: ");
+  Serial.println("#: " + studentID);
 
-### Step 2: Update the ESP32 `/submit` Endpoint to Handle New Fields
+  // Send data to PHP server
+  sendToServer(uid, firstName, lastName, studentID);
 
-Update the **ESP32 `/submit`** handler to send the new fields to your **PHP server**.
+  delay(2000); // Wait before scanning the next card
+}
 
-Here’s the updated **submit handler** for the ESP32 server:
+void connectWiFi() {
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+}
 
-```cpp
-server.on("/submit", HTTP_POST, [](AsyncWebServerRequest *request){
-    String student_id = request->getParam("student_id", true)->value();
-    String first_name = request->getParam("first_name", true)->value();
-    String last_name = request->getParam("last_name", true)->value();
-    String day = request->getParam("day", true)->value();
-    String rfid_uid = request->getParam("rfid_uid", true)->value();
-    
-    // Send data to PHP server
-    HTTPClient http;
-    String url = "http://192.168.1.4/myprojects/test/apply_data.php";  // Change to your PHP script URL
-    http.begin(url);
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    
-    String postData = "student_id=" + student_id + 
-                      "&first_name=" + first_name + 
-                      "&last_name=" + last_name + 
-                      "&day=" + day + 
-                      "&rfid_uid=" + rfid_uid;
-    
-    int httpCode = http.POST(postData);
-    String result = http.getString();
-    
-    // Send the result back to the client (AJAX response)
-    if (result == "1") {
-      request->send(200, "text/plain", "1");  // Success
-    } else {
-      request->send(200, "text/plain", "0");  // Failure
+String getInput(String prompt) {
+  String input = "";
+  Serial.println(prompt);
+  while (input.length() == 0) {
+    if (Serial.available() > 0) {
+      input = Serial.readString();
+      input.trim(); // Remove extra spaces
     }
-    http.end();
-});
-```
+  }
+  return input;
+}
 
-### Step 3: Update Your PHP Script to Handle New Fields
+void sendToServer(String uid, String firstName, String lastName, String studentID) {
+  HTTPClient http;
+  String url = serverURL + "?uid=" + uid + "&firstName=" + firstName + "&lastName=" + lastName + "&studentID=" + studentID;
+  http.begin(url);  // Start HTTP request
 
-Finally, modify your **PHP script** (`apply_data.php`) to handle the new fields and insert them into the database.
+  int httpResponseCode = http.GET();  // Send GET request to the server
 
-Here’s the updated **PHP code**:
+  if (httpResponseCode > 0) {
+    String response = http.getString();  // Get the response from the server
+    Serial.println("Response from server: " + response);  // Print the response from the server
+  } else {
+    Serial.println("Error sending data: " + String(httpResponseCode));
+  }
 
-```php
+  http.end();  // End the HTTP connection
+}
+
+
+
+
+
+
+***********************************************************
+
+
 <?php
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "rfid_system";  // Your MySQL database name
+$servername = "localhost";  // MySQL server address
+$username = "your_username"; // MySQL username
+$password = "your_password"; // MySQL password
+$dbname = "your_database"; // MySQL database name
 
 // Create connection
 $conn = new mysqli($servername, $username, $password, $dbname);
@@ -153,134 +110,62 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Retrieve POST data
-$student_id = $_POST['student_id'];  // Get student ID from the form
-$first_name = $_POST['first_name'];  // Get first name
-$last_name = $_POST['last_name'];    // Get last name
-$day = $_POST['day'];                // Get selected day
-$rfid_uid = $_POST['rfid_uid'];      // Get RFID UID
+// Get data from the GET request
+$uid = isset($_GET['uid']) ? $_GET['uid'] : '';
+$firstName = isset($_GET['firstName']) ? $_GET['firstName'] : '';
+$lastName = isset($_GET['lastName']) ? $_GET['lastName'] : '';
+$studentID = isset($_GET['studentID']) ? $_GET['studentID'] : '';
 
-// Insert data into the database
-$sql = "INSERT INTO students (student_id, first_name, last_name, day, rfid_uid) 
-        VALUES ('$student_id', '$first_name', '$last_name', '$day', '$rfid_uid')";
+// Check if all required data is provided
+if ($uid && $firstName && $lastName && $studentID) {
+    // Prepare the SQL statement to insert data
+    $sql = "INSERT INTO students (uid, first_name, last_name, student_id) 
+            VALUES ('$uid', '$firstName', '$lastName', '$studentID')";
 
-// Execute the query and check if successful
-if ($conn->query($sql) === TRUE) {
-    echo "1";  // Success
+    if ($conn->query($sql) === TRUE) {
+        echo "New record created successfully";  // Success message
+    } else {
+        echo "Error: " . $sql . "<br>" . $conn->error;  // Error message if insertion fails
+    }
 } else {
-    echo "0";  // Failure
+    echo "Error: Missing data fields";  // Error message if any field is missing
 }
 
 $conn->close();
 ?>
-```
-
-### Key Changes in PHP:
-- **First Name, Last Name, and Day**: Added the new fields to the SQL query to insert the **first name**, **last name**, and **day** into the `students` table.
-
-### Step 4: Test the System
-
-1. **Scan an RFID Card**: The **RFID UID** will be automatically inserted into the hidden input field.
-2. **Fill in the Form**: Enter the **student ID**, **first name**, **last name**, and select the **day**.
-3. **Submit the Form**: The data will be sent via **AJAX** to the **PHP server**, and the submission result will be shown on the page.
-
-### Conclusion
-
-With these updates, your form will now include:
-1. A dropdown for selecting the **day** (`شنبه - یکشنبه - دوشنبه - سه‌شنبه - چهارشنبه`).
-2. **First name** and **last name** input fields.
-3. **AJAX** form submission, so the page doesn’t need to refresh after each submission.
-
-This will make the user experience smoother and allow you to capture more detailed information for each RFID scan.
 
 
 
 
-// THIS PART IS .INO FILE CHECK IT AND EDIT IT **********//
-
-#include <WiFi.h>
-#include "time.h"
-#include <MFRC522.h>
-#include <SPI.h>
-#include <HTTPClient.h> 
-
-#define RST_PIN  4
-#define SS_PIN 5
-
-MFRC522 mfrc522(SS_PIN, RST_PIN);   
-const int buzPin = 25; 
-
-const char* ssid     = "WLAN_2818";
-const char* password = "erfan.askari021";
-
-const String room = "251";   // class number
-String URL = "http://192.168.1.4/myprojects/test/apply_data.php"; // change the IP address
+*******************************************************************************
 
 
-void setup() {
-  // Serial.begin(9600);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(100);  // Wait until connected
-  }
 
-  SPI.begin();
-  mfrc522.PCD_Init();
-  pinMode(buzPin, OUTPUT);
-  digitalWrite(buzPin, 0);
-}
+    #include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClient.h>
+#include <urlencode.h>  // This is a helper library for URL encoding, you can use the Arduino `urlencode()` method.
 
-void loop() {
-  if (WiFi.status() == WL_CONNECTION_LOST || WiFi.status() == WL_DISCONNECTED) {
-    lcd.setCursor(0, 0);
-    lcd.print("      Wifi      ");
-    lcd.setCursor(0, 1);
-    lcd.print("  Disconnected  ");
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(100);  // Wait until reconnected
-    }
-  }
+void sendToServer(String uid, String firstName, String lastName, String studentID) {
+  HTTPClient http;
 
-  if (!mfrc522.PICC_IsNewCardPresent()) {
-    return;
-  }
+  // URL encode the parameters
+  String encodedFirstName = urlencode(firstName);  // Ensure first name is URL encoded
+  String encodedLastName = urlencode(lastName);    // Ensure last name is URL encoded
+  String encodedStudentID = urlencode(studentID);  // Ensure student ID is URL encoded
 
-  if (!mfrc522.PICC_ReadCardSerial()) {
-    return;
-  }
-  
-  String UidCard = "";
-  for (byte i = 0; i < mfrc522.uid.size; i++) {  
-    UidCard.concat(String(mfrc522.uid.uidByte[i], HEX));
-  }
+  String url = "http://192.168.x.x/insert_data.php?uid=" + uid + "&firstName=" + encodedFirstName + "&lastName=" + encodedLastName + "&studentID=" + encodedStudentID;
 
-  UidCard.toUpperCase();
-  String postData = "UIDCard=" + String(UidCard) + "&Room=" + String(room);
-  
-  HTTPClient http; 
-  http.begin(URL);
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  int httpCode = http.POST(postData); 
-  String result = http.getString();
-  
-  if (result == "1") {
-    digitalWrite(buzPin, 1);
-    delay(70);
+  http.begin(url);  // Start HTTP request
+
+  int httpResponseCode = http.GET();  // Send GET request to the server
+
+  if (httpResponseCode > 0) {
+    String response = http.getString();  // Get the response from the server
+    Serial.println("Response from server: " + response);  // Print the response from the server
   } else {
-    digitalWrite(buzPin, 1);
-    delay(30);
-    digitalWrite(buzPin, 0);
-    delay(70);
-    digitalWrite(buzPin, 1);
-    delay(30);
-    digitalWrite(buzPin, 0);
-    delay(70);
-    digitalWrite(buzPin, 1);
-    delay(30);
-    digitalWrite(buzPin, 0);
+    Serial.println("Error sending data: " + String(httpResponseCode));
   }
 
-  http.end();
+  http.end();  // End the HTTP connection
 }
-
-
